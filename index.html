@@ -724,6 +724,40 @@
     source.replaceWith(app);
     if (originalFooter) originalFooter.remove();
 
+    // Padroniza os textos visíveis do fluxo de compartilhamento em Title Case.
+    // Preposições permanecem em minúsculas, exceto quando iniciam o texto.
+    const sharePrepositions = new Set(['a','ante','apos','até','com','contra','de','desde','do','da','dos','das','em','entre','para','perante','por','sem','sob','sobre','trás','no','na','nos','nas','ao','aos','à','às']);
+    function toShareTitleCase(value) {
+      let firstWord = true;
+      return String(value).replace(/[\p{L}\p{N}]+(?:[’'][\p{L}]+)?/gu, word => {
+        const lower = word.toLocaleLowerCase('pt-BR');
+        const isAcronym = word.length > 1 && word === word.toLocaleUpperCase('pt-BR') && /[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(word);
+        const result = isAcronym ? word : (sharePrepositions.has(lower) && !firstWord ? lower : lower.charAt(0).toLocaleUpperCase('pt-BR') + lower.slice(1));
+        firstWord = false;
+        return result;
+      });
+    }
+    function normalizeShareText(root) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      const sentenceCaseExceptions = [
+        'Selecione os arquivos que farão parte do compartilhamento.',
+        'Cada objeto possui sua própria configuração. As opções exibidas são as disponíveis neste HTML; o sistema original precisa fornecer outras opções para permitir tipos diferentes.',
+        '*O compartilhamento de informações é de responsabilidade do usuário que realiza a ação. Lembramos que essa ação é registrada em log.'
+      ];
+      nodes.forEach(node => {
+        const original = node.nodeValue;
+        // Mantém textos explicativos e avisos em sentence case.
+        if (sentenceCaseExceptions.some(exception => original.includes(exception))) return;
+        const updated = toShareTitleCase(original);
+        if (updated !== original) node.nodeValue = updated;
+      });
+    }
+    normalizeShareText(app);
+    const shareTextObserver = new MutationObserver(() => normalizeShareText(app));
+    shareTextObserver.observe(app, { childList: true, characterData: true, subtree: true });
+
     const $ = id => app.querySelector('#' + id);
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     function demoPdfUrl(fileName, description) {
@@ -770,7 +804,7 @@
       render();
     }
     function button(label, action, style = 'blueB', disabled = false) {
-      const b = document.createElement('button'); b.type = 'button'; b.className = `button ${style}`; b.textContent = label; b.disabled = disabled; b.addEventListener('click', action); return b;
+      const b = document.createElement('button'); b.type = 'button'; b.className = `button ${style}`; b.textContent = toShareTitleCase(label); b.disabled = disabled; b.addEventListener('click', action); return b;
     }
     function actions(backLabel = 'Voltar', nextLabel = 'Continuar', nextAction = () => setStep(state.step + 1), nextDisabled = false) {
       const el = $('share-stage-actions'); el.replaceChildren();
