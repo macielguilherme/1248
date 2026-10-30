@@ -701,7 +701,7 @@
     // Configuração demonstrativa do projeto. Altere para true para simular um projeto
     // configurado globalmente para compartilhar somente documentos anonimizados.
     const PROJECT_ONLY_ANONYMIZED = false;
-    const state = { step: 1, selectedObjects: new Set(), selectedDocuments: new Map(), shareTypes: new Map(), search: '', busy: false, onlyAnonymized: PROJECT_ONLY_ANONYMIZED };
+    const state = { step: 1, view: 'files', selectedObjects: new Set(objects.map(o => o.id)), selectedDocuments: new Map(), shareTypes: new Map(), search: '', busy: false, onlyAnonymized: PROJECT_ONLY_ANONYMIZED, recipients: [''], availability: '7', observations: '', shared: false };
     objects.forEach(o => state.selectedDocuments.set(o.id, demoEnrollmentFiles.map((file, fileIndex) => ({
       id: `${o.id}-demo-pdf-${fileIndex + 1}`, name: file.name, filename: file.name,
       description: file.description, type: file.format || 'PDF', format: file.format || 'PDF',
@@ -712,11 +712,9 @@
     app.id = 'share-workflow-app';
     app.innerHTML = `
       <div id="share-stepper" aria-label="Etapas do compartilhamento">
-        <div class="share-step active" data-step="1"><b>1</b><span>Objetos</span></div>
-        <div class="share-step" data-step="2"><b>2</b><span>Documentos</span></div>
-        <div class="share-step" data-step="3"><b>3</b><span>Revisão</span></div>
-        <div class="share-step" data-step="4"><b>4</b><span>Tipo de Compartilhamento</span></div>
-        <div class="share-step" data-step="5"><b>5</b><span>Finalizado</span></div>
+        <div class="share-step active" data-step="1"><b>1</b><span>Selecionar Arquivos</span></div>
+        <div class="share-step" data-step="2"><b>2</b><span>Tipo de Compartilhamento</span></div>
+        <div class="share-step" data-step="3"><b>3</b><span>Destinatários</span></div>
       </div>
       <div id="share-stage-heading"><strong id="share-stage-title"></strong><span id="share-stage-description"></span></div>
       <div id="share-stage-toolbar"></div>
@@ -763,10 +761,11 @@
     }
     const selectedObjectList = () => objects.filter(o => state.selectedObjects.has(o.id));
     const selectedDocList = () => selectedObjectList().flatMap(o => (state.selectedDocuments.get(o.id) || []).filter(d => d.selected && (!state.onlyAnonymized || d.anonymized)).map(d => ({...d, parent: o})));
-    function updateDocumentCounters() { const count = selectedDocList().length; const toolbar = $('share-stage-toolbar').querySelector('.share-count'); if (toolbar) toolbar.textContent = `${selectedObjectList().length} objeto(s) · ${count} documento(s) selecionado(s)`; const next = $('share-stage-actions').querySelector('button.button.blueB'); if (next && state.step === 2) next.disabled = count === 0; }
+    function updateDocumentCounters() { const count = selectedDocList().length; const toolbar = $('share-stage-toolbar').querySelector('.share-count'); if (toolbar) toolbar.textContent = `${selectedObjectList().length} objeto(s) · ${count} arquivo(s) selecionado(s)`; const next = $('share-stage-actions').querySelector('button.button.blueB'); if (next && state.step === 1) next.disabled = count === 0; }
     function setMessage(message, error = false) { $('share-stage-message').textContent = message || ''; $('share-stage-message').className = error ? 'error' : ''; }
     function setStep(step) {
       state.step = step;
+      if (step !== 1) state.view = 'files';
       app.querySelectorAll('.share-step').forEach(el => { el.classList.toggle('active', Number(el.dataset.step) === step); el.classList.toggle('done', Number(el.dataset.step) < step); });
       render();
     }
@@ -775,34 +774,27 @@
     }
     function actions(backLabel = 'Voltar', nextLabel = 'Continuar', nextAction = () => setStep(state.step + 1), nextDisabled = false) {
       const el = $('share-stage-actions'); el.replaceChildren();
-      if (state.step > 1 && state.step < 5) el.append(button(backLabel, () => { setMessage(''); setStep(state.step - 1); }, 'greenB'));
-      if (state.step < 5) el.append(button(nextLabel, nextAction, 'blueB', nextDisabled));
-      if (state.step === 5) el.append(button('Fechar', () => { const close = document.querySelector('[aria-labelledby="ui-dialog-title-dialogCompartilharItem"] .wijmo-wijdialog-titlebar-close'); if (close) close.click(); else { const d = document.querySelector('[aria-labelledby="ui-dialog-title-dialogCompartilharItem"]'); if (d) d.style.display = 'none'; } }, 'greenB'));
+      if (state.step > 1) el.append(button(backLabel, () => { setMessage(''); setStep(state.step - 1); }, 'greenB'));
+      if (state.step < 3) el.append(button(nextLabel, nextAction, 'blueB', nextDisabled));
     }
     function render() {
       $('share-stage-toolbar').replaceChildren(); $('share-stage-content').replaceChildren(); $('share-stage-actions').replaceChildren(); setMessage('');
       const existingPdfViewer = document.getElementById('share-pdf-side-viewer');
-      if (existingPdfViewer && state.step !== 2) {
+      if (existingPdfViewer && state.step !== 1) {
         existingPdfViewer.style.display = 'none';
         $('dialogCompartilharItem').style.flexDirection = 'column';
         $('share-workflow-app').style.flex = '';
         $('share-workflow-app').style.width = '';
-      } else if (existingPdfViewer && state.step === 2) {
+      } else if (existingPdfViewer && state.step === 1) {
         existingPdfViewer.style.display = 'flex';
       }
       const title = $('share-stage-title'), description = $('share-stage-description');
-      if (state.step === 1) {
-        title.textContent = 'Lista de Objetos para Escolher'; description.textContent = 'Selecione os objetos que farão parte do compartilhamento.';
-        const search = document.createElement('input'); search.id = 'share-workflow-search'; search.type = 'search'; search.placeholder = 'Pesquisar por identificador, descrição ou tipo…'; search.value = state.search; search.addEventListener('input', () => { state.search = search.value; renderObjectTable(); });
-        const selectAllLabel = document.createElement('label'); selectAllLabel.className = 'share-select-all'; const selectAll = document.createElement('input'); selectAll.type = 'checkbox'; selectAll.checked = objects.length > 0 && objects.every(o => state.selectedObjects.has(o.id)); selectAll.addEventListener('change', () => { visibleObjects().forEach(o => selectAll.checked ? state.selectedObjects.add(o.id) : state.selectedObjects.delete(o.id)); render(); }); selectAllLabel.append(selectAll, document.createTextNode(' Selecionar todos os objetos'));
-        const count = document.createElement('span'); count.className = 'share-count'; count.textContent = `${state.selectedObjects.size} selecionado(s)`; $('share-stage-toolbar').append(search, selectAllLabel, count); renderObjectTable();
-        actions('Voltar', 'Escolher documentos', () => { if (!state.selectedObjects.size) return setMessage('Selecione pelo menos um objeto para continuar.', true); setStep(2); }, !state.selectedObjects.size);
-      } else if (state.step === 2) {
-        title.textContent = 'Lista de Documentos de Cada Objeto para Escolher'; description.textContent = 'Selecione os documentos de cada objeto.';
+      if (state.step === 1 && state.view === 'files') {
+title.textContent = 'Selecionar Arquivos'; description.textContent = 'Selecione os arquivos que farão parte do compartilhamento.';
         const sideViewer = ensurePdfSideViewer();
         if (sideViewer) { const frame = sideViewer.querySelector('.share-pdf-viewer-frame'); frame.src = 'https://itapira.sp.gov.br/dowloads/20200716084620.pdf'; sideViewer.querySelector('.share-pdf-viewer-title').textContent = 'Visualizar: documento-identidade.pdf'; }
         const docs = selectedObjectList().flatMap(o => (state.selectedDocuments.get(o.id) || []).map(d => ({...d, parent:o})));
-        $('share-stage-toolbar').innerHTML = `<label class="share-anonymized-filter"><input id="share-only-anonymized" type="checkbox" ${state.onlyAnonymized ? 'checked' : ''} ${PROJECT_ONLY_ANONYMIZED ? 'disabled' : ''}><span>Compartilhar apenas documentos anonimizados</span></label><span class="share-count">${selectedObjectList().length} objeto(s) · ${selectedDocList().length} documento(s) selecionado(s)</span>`;
+        $('share-stage-toolbar').innerHTML = `<label class="share-anonymized-filter"><input id="share-only-anonymized" type="checkbox" ${state.onlyAnonymized ? 'checked' : ''} ${PROJECT_ONLY_ANONYMIZED ? 'disabled' : ''}><span>Compartilhar apenas arquivos anonimizados</span></label><span class="share-count">${selectedObjectList().length} objeto(s) · ${selectedDocList().length} arquivo(s) selecionado(s)</span>`;
         const anonFilter = $('share-only-anonymized');
         if (PROJECT_ONLY_ANONYMIZED) anonFilter.title = 'Definido pela configuração global do projeto';
         anonFilter.addEventListener('change', () => {
@@ -828,7 +820,7 @@
           selectAllWrap.append(selectAll, document.createTextNode(' Selecionar todos deste objeto'));
           heading.append(title, selectAllWrap);
           const list = document.createElement('div'); list.className = 'share-document-list';
-          if (!docsForObject.length) list.innerHTML = `<div class="share-empty">${state.onlyAnonymized ? 'Nenhum documento anonimizado disponível para este objeto.' : 'Nenhum PDF disponível para este objeto.'}</div>`;
+          if (!docsForObject.length) list.innerHTML = `<div class="share-empty">${state.onlyAnonymized ? 'Nenhum arquivo anonimizado disponível para este objeto.' : 'Nenhum PDF disponível para este objeto.'}</div>`;
           else docsForObject.forEach((doc, idx) => {
             const row = document.createElement('div'); row.className = 'share-document-row';
             const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = !!doc.selected; checkbox.setAttribute('aria-label', `Selecionar ${doc.name || `Documento ${idx+1}`}`);
@@ -848,13 +840,13 @@
         });
         if (!selectedObjectList().length) content.innerHTML = '<div class="share-empty">Nenhum objeto selecionado. Volte e selecione pelo menos um objeto.</div>';
         const hasSelectedDocs = selectedDocList().length > 0;
-        actions('Voltar', 'Ir para revisão', () => { if (!selectedDocList().length) return setMessage('Selecione pelo menos um documento para continuar.', true); setStep(3); }, !hasSelectedDocs);
-      } else if (state.step === 3) {
-        title.textContent = 'Revisão'; description.textContent = 'Confira os documentos escolhidos para cada objeto antes de configurar o compartilhamento.';
-        const docs = selectedDocList(); $('share-stage-toolbar').innerHTML = `<span class="share-count">${selectedObjectList().length} objeto(s) · ${docs.length} documento(s)</span>`;
+        actions('Voltar', 'Ir para revisão', () => { if (!selectedDocList().length) return setMessage('Selecione pelo menos um arquivo para continuar.', true); state.view = 'review'; render(); }, !hasSelectedDocs);
+      } else if (state.step === 1 && state.view === 'review') {
+        title.textContent = 'Revisar Arquivos'; description.textContent = 'Confira os arquivos escolhidos para cada objeto antes de configurar o compartilhamento.';
+        const docs = selectedDocList(); $('share-stage-toolbar').innerHTML = `<span class="share-count">${selectedObjectList().length} objeto(s) · ${docs.length} arquivo(s)</span>`;
         const reviewContent = $('share-stage-content');
         if (!docs.length) {
-          reviewContent.innerHTML = '<div class="share-empty">Nenhum documento selecionado.</div>';
+          reviewContent.innerHTML = '<div class="share-empty">Nenhum arquivo selecionado.</div>';
         } else {
           const grouped = new Map();
           docs.forEach(doc => {
@@ -874,7 +866,7 @@
             const tbody = table.querySelector('tbody');
             group.docs.forEach(doc => {
               const tr = document.createElement('tr');
-              tr.innerHTML = `<td>${esc(doc.name || doc.filename || 'Documento')}</td>`;
+              tr.innerHTML = `<td class="share-review-file-cell"><span class="share-review-file-name">${esc(doc.name || doc.filename || 'Arquivo')}</span><span class="${doc.anonymized ? 'share-anonymized-badge' : 'share-original-badge'}">${doc.anonymized ? 'Anonimizado' : 'Original'}</span></td>`;
               tbody.append(tr);
             });
             section.append(heading, table);
@@ -882,10 +874,10 @@
             objectIndex++;
           });
         }
-        actions('Voltar', 'Configurar tipo de compartilhamento', () => setStep(4));
-      } else if (state.step === 4) {
+        $('share-stage-actions').replaceChildren(button('Voltar', () => { state.view = 'files'; render(); }, 'greenB'), button('Continuar', () => setStep(2), 'blueB'));
+      } else if (state.step === 2) {
         title.textContent = 'Configurar Tipo de Compartilhamento'; description.textContent = 'Defina separadamente o tipo de compartilhamento de cada objeto selecionado.';
-        const docs = selectedDocList(); $('share-stage-toolbar').innerHTML = `<span class="share-count">${selectedObjectList().length} objeto(s) · ${docs.length} documento(s) para compartilhar</span>`;
+        const docs = selectedDocList(); $('share-stage-toolbar').innerHTML = `<span class="share-count">${selectedObjectList().length} objeto(s) · ${docs.length} arquivo(s) para compartilhar</span>`;
         const panel = document.createElement('div'); panel.className='share-config share-config-by-object';
         const types = [{value:'1', label:'COMPARTILHAMENTO PADRÃO'}];
         selectedObjectList().forEach(o => {
@@ -902,19 +894,49 @@
         });
         const note = document.createElement('p'); note.textContent = 'Cada objeto possui sua própria configuração. As opções exibidas são as disponíveis neste HTML; o sistema original precisa fornecer outras opções para permitir tipos diferentes.'; panel.append(note);
         $('share-stage-content').append(panel);
-        actions('Voltar', 'Confirmar e compartilhar', async () => {
-          if (!selectedDocList().length) return setMessage('Selecione pelo menos um documento para enviar.', true);
-          if (state.busy) return;
-          state.busy = true;
-          const btn = $('share-stage-actions').querySelector('button.button.blueB');
-          if (btn) { btn.disabled = true; btn.textContent = 'Processando…'; }
-          // Protótipo: conclui o fluxo visual localmente, sem enviar dados a um backend.
-          window.setTimeout(() => { state.busy = false; setStep(5); }, 450);
-        }, state.busy);
+        actions('Voltar', 'Continuar para destinatários', () => setStep(3));
       } else {
-        title.textContent = 'Finalizado'; description.textContent = 'Fluxo de compartilhamento concluído.';
-        $('share-stage-content').innerHTML = '<div class="share-success"><strong>Compartilhamento Concluído</strong></div>'; actions();
+        title.textContent = 'Destinatários'; description.textContent = 'Informe os e-mails que receberão o compartilhamento e defina por quanto tempo ele ficará disponível.';
+        renderRecipients();
       }
+    }
+    function renderRecipients() {
+      const content = $('share-stage-content');
+      if (state.shared) {
+        content.innerHTML = '<div class="share-success"><strong>Compartilhamento preparado</strong><p>Este protótipo não envia e-mails nem publica arquivos em um servidor.</p></div>';
+        $('share-stage-actions').replaceChildren(button('Voltar', () => { state.shared = false; setStep(3); }, 'greenB'));
+        return;
+      }
+      const form = document.createElement('div'); form.className = 'share-recipients-form';
+      const emailTitle = document.createElement('strong'); emailTitle.textContent = 'E-mail dos destinatários'; form.append(emailTitle);
+      const emailList = document.createElement('div'); emailList.className = 'share-email-list';
+      const drawEmails = () => {
+        emailList.replaceChildren();
+        state.recipients.forEach((value, index) => {
+          const row = document.createElement('div'); row.className = 'share-email-row';
+          const input = document.createElement('input'); input.type = 'email'; input.required = true; input.placeholder = 'nome@empresa.com.br'; input.value = value; input.setAttribute('aria-label', `E-mail do destinatário ${index + 1}`);
+          input.addEventListener('input', () => state.recipients[index] = input.value);
+          row.append(input);
+          if (index > 0) { const remove = button('−', () => { state.recipients.splice(index, 1); drawEmails(); }, 'greenB'); remove.classList.add('share-remove-email'); row.append(remove); }
+          emailList.append(row);
+        });
+      };
+      drawEmails();
+      const add = button('+ Adicionar e-mail', () => { state.recipients.push(''); drawEmails(); }, 'greenB'); add.classList.add('share-add-email');
+      const durationLabel = document.createElement('label'); durationLabel.textContent = 'Compartilhamento disponível por:'; durationLabel.htmlFor = 'share-availability';
+      const duration = document.createElement('select'); duration.id = 'share-availability';
+      [['1','1 Dia'],['3','3 dias'],['7','7 dias'],['14','14 dias'],['30','30 dias']].forEach(([v,l]) => duration.add(new Option(l,v)));
+      duration.value = state.availability; duration.addEventListener('change', () => state.availability = duration.value);
+      const obsLabel = document.createElement('label'); obsLabel.textContent = 'Observações (texto a ser exibido no corpo do e-mail):'; obsLabel.htmlFor = 'share-observations';
+      const observations = document.createElement('textarea'); observations.id = 'share-observations'; observations.rows = 4; observations.placeholder = 'Digite uma mensagem para os destinatários…'; observations.value = state.observations; observations.addEventListener('input', () => state.observations = observations.value);
+      const disclaimer = document.createElement('p'); disclaimer.className = 'share-disclaimer'; disclaimer.textContent = '*O compartilhamento de informações é de responsabilidade do usuário que realiza a ação. Lembramos que essa ação é registrada em log.';
+      form.append(emailList, add, durationLabel, duration, obsLabel, observations, disclaimer); content.append(form);
+      $('share-stage-actions').replaceChildren(button('Voltar', () => setStep(2), 'greenB'), button('Compartilhar', () => {
+        const validEmails = state.recipients.map(v => v.trim());
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!validEmails.length || validEmails.some(v => !emailPattern.test(v))) return setMessage('Informe um e-mail válido em cada campo.', true);
+        state.shared = true; renderRecipients();
+      }, 'blueB'));
     }
     function visibleObjects() { const q = state.search.trim().toLocaleLowerCase('pt-BR'); return objects.filter(o => !q || [o.identifier,o.clientIdentifier,o.description,o.status,o.type].join(' ').toLocaleLowerCase('pt-BR').includes(q)); }
     function renderObjectTable() {
@@ -979,7 +1001,7 @@
 
     const style = document.createElement('style'); style.id='share-workflow-functional-styles'; style.textContent = `
       #share-workflow-app{display:flex;flex-direction:column;min-height:0;height:100%;font:inherit;color:inherit}#share-stepper{display:flex;gap:0;justify-content:space-between;flex:0 0 auto;padding:4px 0 12px;border-bottom:1px solid #e2e2e2}.share-step{display:flex;align-items:center;gap:6px;color:#888;font-size:11px;min-width:0}.share-step b{display:inline-flex;width:23px;height:23px;border:1px solid #c9c9c9;border-radius:50%;align-items:center;justify-content:center;flex:0 0 auto}.share-step.active{color:#2b6893;font-weight:bold}.share-step.active b,.share-step.done b{background:#2b6893;border-color:#2b6893;color:#fff}#share-stage-heading{padding:12px 4px 10px;border-bottom:1px solid #e2e2e2;flex:0 0 auto}#share-stage-title{display:block;font-size:13px;margin-bottom:4px}#share-stage-description{font-size:11px;color:#666}#share-stage-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 4px;border-bottom:1px solid #e2e2e2;flex:0 0 auto}#share-workflow-search{box-sizing:border-box;width:min(360px,100%);height:32px;padding:6px 9px;border:1px solid #cbcbcb;border-radius:2px;font:inherit}.share-select-all{display:inline-flex;align-items:center;gap:5px;font-size:11px}.share-count{font-size:11px;font-weight:bold;margin-left:auto;padding:5px 8px;border:1px solid #e2e2e2;border-radius:2px;white-space:nowrap}#share-stage-content{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 2px}#share-stage-actions{display:flex;flex:0 0 auto;justify-content:flex-end;gap:8px;padding:11px 0 0;border-top:1px solid #e2e2e2}#share-stage-actions .button{border:0;min-width:110px;height:34px;padding:0 14px;cursor:pointer;font:inherit;font-size:11px;border-radius:2px}#share-stage-actions .button:disabled{opacity:.5;cursor:not-allowed}.share-table{width:100%;min-width:760px;border-collapse:collapse;font-size:11px}.share-table th{background:#efefef;text-align:left;font-weight:bold;white-space:nowrap}.share-table th,.share-table td{padding:9px 10px;border-bottom:1px solid #e2e2e2}.share-table tr:hover{background:#f5f5f5}.share-table td:first-child,.share-table th:first-child{text-align:center;width:65px}.share-table input,.share-document-row input,.share-select-all input{accent-color:#2b6893}.share-empty{padding:18px 14px;border:1px solid #e2e2e2;background:#f7f7f7;font-size:11px;line-height:1.6;color:#555}.share-object-section{margin-bottom:12px;border:1px solid #e2e2e2}.share-object-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px;background:#efefef;font-size:11px;cursor:pointer;list-style-position:inside}.share-object-heading::-webkit-details-marker{color:#666}.share-object-section[open]>.share-object-heading{border-bottom:1px solid #e2e2e2}.share-demo-tag{font-size:10px;color:#777;font-weight:normal}.share-object-select-all{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:10px;font-weight:normal}.share-document-list{padding:8px}.share-document-row{display:flex;align-items:center;gap:9px;padding:9px;border-bottom:1px solid #eee;font-size:11px;cursor:pointer}.share-document-row small{display:block;color:#777;margin-top:3px}.share-pdf-badge{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:34px;padding:5px 7px;box-sizing:border-box;border:1px solid #d7b3b3;border-radius:2px;color:#a12622;background:#fff7f7;font-size:10px;font-weight:bold;line-height:1.2}.share-document-details{min-width:0;overflow-wrap:anywhere}.share-pdf-open{display:inline-block;margin-top:5px;color:#2b6893;text-decoration:underline;font-size:10px}.share-document-filename{cursor:pointer;color:#2b6893;text-decoration:underline}.share-document-filename:focus{outline:1px dotted #2b6893}
-      .share-anonymized-filter{display:inline-flex;align-items:center;gap:7px;font-size:11px;line-height:1.4;cursor:pointer}.share-anonymized-filter input{accent-color:#2b6893;width:14px;height:14px}.share-anonymized-config-note{color:#666;font-size:10px;flex-basis:100%;margin-left:21px}.share-anonymized-badge,.share-original-badge{display:inline-flex;align-items:center;flex:0 0 auto;margin-left:8px;padding:2px 5px;border-radius:2px;font-size:9px;line-height:1.4;white-space:nowrap}.share-anonymized-badge{background:#222;color:#fff}.share-original-badge{background:#eee;color:#555;border:1px solid #ddd}.share-review-group{margin-bottom:14px;border:1px solid #d5d5d5}.share-review-group-heading{padding:9px 11px;font-weight:bold;font-size:11px;border-bottom:1px solid #d5d5d5}.share-review-group-base>.share-review-group-heading{background:#e7e7e7}.share-review-group-alt>.share-review-group-heading{background:#cfcfcf}.share-review-group-base{background:#fff}.share-review-group-alt{background:#e9e9e9}.share-review-table{min-width:0;width:100%}.share-review-table td{vertical-align:top;white-space:normal}.share-review-table th:first-child,.share-review-table td:first-child{text-align:left;width:auto}.share-review-table th{background:rgba(0,0,0,.035)}.share-review-table tbody tr:nth-child(odd){background:#fff}.share-review-table tbody tr:nth-child(even){background:#f2f2f2}.share-review-table tbody tr:hover{background:#e8e8e8}.share-review-table td small{display:inline-block;color:#777;margin-top:4px}.share-config{max-width:600px;padding:12px}.share-config label{display:block;margin-bottom:8px;font-size:12px}.share-config select{display:block;box-sizing:border-box;width:min(460px,100%);height:34px;padding:5px 8px;border:1px solid #cbcbcb;background:#fff;font:inherit}.share-config p{font-size:11px;color:#666;margin-top:12px;line-height:1.5}.share-config-by-object{max-width:none;padding:4px 0}.share-config-object{display:grid;grid-template-columns:minmax(130px,1fr) minmax(160px,1fr) minmax(220px,1.5fr);align-items:center;gap:12px;padding:11px 12px;border:1px solid #e2e2e2;margin-bottom:7px;background:#fff}.share-config-object:nth-child(even){background:#f7f7f7}.share-config-object-title{font-size:11px;overflow-wrap:anywhere}.share-config-object label{margin:0}.share-config-object select{width:100%;min-width:0}@media(max-width:600px){.share-config-object{grid-template-columns:1fr;gap:6px}}.share-success{margin:20px auto;max-width:600px;padding:24px;border:1px solid #d9e5d9;background:#f7fbf7;text-align:center}.share-success strong{display:block;font-size:15px;margin-bottom:8px}.share-success p{font-size:11px;color:#555}.error{color:#a12622;font-size:11px;padding:6px 4px;flex:0 0 auto}#dialogCompartilharItem{gap:0!important}@media(max-width:720px){#share-stepper{flex-wrap:wrap;gap:9px}.share-step{flex:1 1 28%}#share-stage-toolbar{align-items:flex-start;flex-direction:column}.share-count{margin-left:0}#share-stage-actions .button{min-width:90px}}
+      .share-anonymized-filter{display:inline-flex;align-items:center;gap:7px;font-size:11px;line-height:1.4;cursor:pointer}.share-anonymized-filter input{accent-color:#2b6893;width:14px;height:14px}.share-anonymized-config-note{color:#666;font-size:10px;flex-basis:100%;margin-left:21px}.share-anonymized-badge,.share-original-badge{display:inline-flex;align-items:center;flex:0 0 auto;margin-left:8px;padding:2px 5px;border-radius:2px;font-size:9px;line-height:1.4;white-space:nowrap}.share-anonymized-badge{background:#222;color:#fff}.share-original-badge{background:#eee;color:#555;border:1px solid #ddd}.share-review-group{margin-bottom:14px;border:1px solid #d5d5d5}.share-review-group-heading{padding:9px 11px;font-weight:bold;font-size:11px;border-bottom:1px solid #d5d5d5}.share-review-group-base>.share-review-group-heading{background:#e7e7e7}.share-review-group-alt>.share-review-group-heading{background:#cfcfcf}.share-review-group-base{background:#fff}.share-review-group-alt{background:#e9e9e9}.share-review-table{min-width:0;width:100%}.share-review-table td{vertical-align:middle;white-space:normal}.share-review-table td.share-review-file-cell{display:flex;align-items:center;justify-content:space-between;gap:12px;width:auto}.share-review-file-name{min-width:0;overflow-wrap:anywhere}.share-review-table .share-anonymized-badge,.share-review-table .share-original-badge{margin-left:auto}.share-review-table th:first-child,.share-review-table td:first-child{text-align:left;width:auto}.share-review-table th{background:rgba(0,0,0,.035)}.share-review-table tbody tr:nth-child(odd){background:#fff}.share-review-table tbody tr:nth-child(even){background:#f2f2f2}.share-review-table tbody tr:hover{background:#e8e8e8}.share-review-table td small{display:inline-block;color:#777;margin-top:4px}.share-config{max-width:600px;padding:12px}.share-config label{display:block;margin-bottom:8px;font-size:12px}.share-config select{display:block;box-sizing:border-box;width:min(460px,100%);height:34px;padding:5px 8px;border:1px solid #cbcbcb;background:#fff;font:inherit}.share-config p{font-size:11px;color:#666;margin-top:12px;line-height:1.5}.share-config-by-object{max-width:none;padding:4px 0}.share-config-object{display:grid;grid-template-columns:minmax(130px,1fr) minmax(160px,1fr) minmax(220px,1.5fr);align-items:center;gap:12px;padding:11px 12px;border:1px solid #e2e2e2;margin-bottom:7px;background:#fff}.share-config-object:nth-child(even){background:#f7f7f7}.share-config-object-title{font-size:11px;overflow-wrap:anywhere}.share-config-object label{margin:0}.share-config-object select{width:100%;min-width:0}@media(max-width:600px){.share-config-object{grid-template-columns:1fr;gap:6px}}.share-success{margin:20px auto;max-width:600px;padding:24px;border:1px solid #d9e5d9;background:#f7fbf7;text-align:center}.share-success strong{display:block;font-size:15px;margin-bottom:8px}.share-success p{font-size:11px;color:#555}.error{color:#a12622;font-size:11px;padding:6px 4px;flex:0 0 auto}#dialogCompartilharItem{gap:0!important}@media(max-width:720px){#share-stepper{flex-wrap:wrap;gap:9px}.share-step{flex:1 1 28%}#share-stage-toolbar{align-items:flex-start;flex-direction:column}.share-count{margin-left:0}#share-stage-actions .button{min-width:90px}}
       /* Blocos compactos; seta explícita para indicar expansão */
       .share-object-section{margin-bottom:6px;border:1px solid #dedede;border-radius:2px}
       .share-object-heading{position:relative;display:flex;align-items:center;gap:7px;padding:6px 9px 6px 25px;min-height:27px;background:#efefef;font-size:11px;cursor:pointer;list-style:none}
@@ -1001,6 +1023,21 @@
       .share-pdf-viewer-close{border:0;background:transparent;color:#444;font-size:26px;line-height:1;cursor:pointer;padding:3px 5px;flex:0 0 auto}
       .share-pdf-viewer-canvas{position:relative;display:flex;flex:1 1 auto;min-height:300px;width:100%;overflow:hidden;background:#fff;box-sizing:border-box}.share-pdf-viewer-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8b8b8b;font-size:12px;background:#fff;border:1px solid #e5e5e5;box-sizing:border-box}.share-pdf-viewer-frame{position:relative;z-index:1;display:block;flex:1 1 auto;width:100%;height:100%;min-height:300px;border:0;background:transparent}
       @media(max-width:900px){.ui-dialog[aria-labelledby="ui-dialog-title-dialogCompartilharItem"]:has(#share-pdf-side-viewer){width:calc(100vw - 24px)!important;left:12px!important;transform:none!important}#share-workflow-app{flex:0 0 52%!important;width:52%!important}#share-pdf-side-viewer{flex:1 1 48%;width:48%}}@media(max-width:650px){#dialogCompartilharItem:has(#share-pdf-side-viewer){flex-direction:column!important;overflow:auto!important}#share-workflow-app{flex:0 0 58%!important;width:100%!important;min-height:320px!important}#share-pdf-side-viewer{flex:1 0 360px!important;width:100%!important;min-height:360px!important}}
+
+      .share-recipients-form{display:flex;flex-direction:column;gap:9px;width:100%;max-width:none;box-sizing:border-box;padding:12px 4px;font-size:11px}.share-recipients-form>strong{font-size:12px}.share-email-list{display:flex;flex-direction:column;gap:7px}.share-email-row{display:flex;gap:7px;align-items:center}.share-email-row input,.share-recipients-form select,.share-recipients-form textarea{box-sizing:border-box;width:100%;min-height:34px;padding:7px 9px;border:1px solid #cbcbcb;border-radius:2px;background:#fff;color:inherit;font:inherit}.share-email-row input{flex:1}.share-recipients-form label{font-weight:bold;margin-top:5px}.share-recipients-form textarea{resize:vertical;min-height:82px}.share-add-email,.share-remove-email{min-width:34px!important}.share-add-email{align-self:flex-start}.share-disclaimer{padding:12px 14px;background:#fff1f1;border:1px solid #e7a5a5;border-left:4px solid #c62828;border-radius:3px;line-height:1.6;color:#a32121}
+      /* Etapas com três áreas de mesma largura */
+      #share-stepper{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;box-sizing:border-box;gap:0;justify-content:initial}
+      .share-step{display:flex;align-items:center;justify-content:flex-start;flex:initial;width:100%;min-width:0;box-sizing:border-box;white-space:normal}
+      .share-step:nth-child(2){justify-content:center}
+      .share-step:nth-child(3){justify-content:flex-end}
+      /* Ações de adicionar/remover e-mail com dimensões consistentes e verde sólido */
+      .share-recipients-form .share-add-email,
+      .share-recipients-form .share-remove-email{display:inline-flex!important;align-items:center;justify-content:center;box-sizing:border-box;border:1px solid #78a91f!important;border-radius:2px!important;background:#86b82b!important;background-image:none!important;color:#fff!important;font-family:Arial,Helvetica,sans-serif!important;font-size:11px!important;font-weight:bold!important;line-height:1!important;text-decoration:none!important;text-shadow:none!important;box-shadow:none!important;cursor:pointer;padding:0 10px!important;height:28px!important;min-height:28px!important}
+      .share-recipients-form .share-add-email{align-self:flex-start;min-width:132px!important}
+      .share-recipients-form .share-remove-email{width:34px!important;min-width:34px!important;height:34px!important;min-height:34px!important;padding:0!important;font-size:16px!important}
+      .share-recipients-form .share-add-email:hover,
+      .share-recipients-form .share-remove-email:hover{background:#719f20!important}
+      @media(max-width:600px){#share-stepper{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.share-step,.share-step:nth-child(2),.share-step:nth-child(3){justify-content:flex-start}.share-step{font-size:10px}.share-step b{width:22px;height:22px}}
       `;
     document.head.append(style);
 
@@ -1009,7 +1046,7 @@
     window.addEventListener('docz:share-documents-loaded', event => {
       const detail = event.detail || {}; if (!detail.objectId || !Array.isArray(detail.documents)) return;
       state.selectedDocuments.set(String(detail.objectId), detail.documents.map(d => ({...d, selected: !!d.selected})));
-      if (state.step === 2) render();
+      if (state.step === 1) render();
     });
     // Expor método para integração existente carregar documentos de forma direta.
     window.doczShareWorkflow = {
